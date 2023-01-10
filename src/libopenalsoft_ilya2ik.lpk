@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <PathDelim Value="\"/>
+    <Name Value="libopenalsoft_ilya2ik"/>
+    <Type Value="RunAndDesignTime"/>
+    <Author Value="Ilya Medvedkov"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <PathDelim Value="\"/>
+      <SearchPaths>
+        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Description Value="Free pascal wrapper around OpenAL library"/>
+    <License Value="LGPL v3.0"/>
+    <Version Minor="9"/>
+    <Files>
+      <Item>
+        <Filename Value="libopenalsoft_dyn.pas"/>
+        <UnitName Value="libOpenALsoft_dyn"/>
+      </Item>
+      <Item>
+        <Filename Value="oglopenalwrapper.pas"/>
+        <UnitName Value="OGLOpenALWrapper"/>
+      </Item>
+      <Item>
+        <Filename Value="oalwavdatahelpers.pas"/>
+        <UnitName Value="oalwavdatahelpers"/>
+      </Item>
+    </Files>
+    <RequiredPkgs>
+      <Item>
+        <PackageName Value="FCL"/>
+      </Item>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>
