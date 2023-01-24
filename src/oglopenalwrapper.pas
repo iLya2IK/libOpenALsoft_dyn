@@ -711,6 +711,7 @@ type
                            freq   : Cardinal;
                            buffersize  : Integer);
     procedure Done;
+    procedure FlushSamples(smp : Integer);
   public
     constructor Create;
     destructor Destroy; override;
@@ -851,6 +852,14 @@ begin
   FStatus := oalcsInvalid;
 end;
 
+procedure TOALCapture.FlushSamples(smp : Integer);
+begin
+  if smp > FBufferSamples then smp := FBufferSamples;
+  FDevice.Samples(FBuffer, smp);
+  if Assigned(FRecorder) then
+     FRecorder.WriteSamples(FBuffer, smp);
+end;
+
 constructor TOALCapture.Create;
 begin
   inherited Create;
@@ -916,13 +925,7 @@ begin
   begin
     smp := FDevice.AvalibleSamples;
     if smp > (FBufferSamples div 2) then
-    begin
-      if smp > FBufferSamples then smp := FBufferSamples;
-      FDevice.Samples(FBuffer, smp);
-
-      if Assigned(FRecorder) then
-         FRecorder.WriteSamples(FBuffer, smp);
-    end;
+      FlushSamples(smp);
   end;
 end;
 
@@ -936,9 +939,14 @@ begin
 end;
 
 procedure TOALCapture.Stop;
+var smp : Integer;
 begin
   if Assigned(FDevice) and (FStatus = oalcsCapturing) then
   begin
+    smp := FDevice.AvalibleSamples;
+    if smp > 0 then
+      FlushSamples(smp);
+
     FDevice.Stop;
     Done;
     FStatus := oalcsInvalid;
