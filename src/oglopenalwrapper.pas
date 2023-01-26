@@ -625,6 +625,7 @@ type
 
     procedure Play;
     procedure PlayLoop;
+    procedure Rewind;
     procedure Pause;
     procedure Stop;
 
@@ -663,6 +664,7 @@ type
 
     procedure Play;
     procedure PlayLoop;
+    procedure Rewind;
     procedure Pause;
     procedure Stop;
 
@@ -1098,7 +1100,8 @@ begin
     end;
     FSource.QueueBuffers(FBuffers);
   end;
-  FSource.Play;
+  if FSource.BuffersQueued > 0 then
+    FSource.Play;
 end;
 
 constructor TOALStreamingHelper.Create(buffers, buffersize : Integer);
@@ -1128,6 +1131,11 @@ begin
   //strange behavior
   //FSource.Looping := true;
   StartPlaying;
+end;
+
+procedure TOALStreamingHelper.Rewind;
+begin
+  FSource.Rewind;
 end;
 
 procedure TOALStreamingHelper.Pause;
@@ -1238,6 +1246,12 @@ procedure TOALPlayer.PlayLoop;
 begin
   if Status in [oalsInitial, oalsPaused, oalsStopped] then
     FStrHelper.PlayLoop;
+end;
+
+procedure TOALPlayer.Rewind;
+begin
+  if Status in [oalsInitial, oalsPaused, oalsStopped] then
+    FStrHelper.Rewind;
 end;
 
 procedure TOALPlayer.Pause;
