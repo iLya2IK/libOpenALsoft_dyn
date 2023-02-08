@@ -152,7 +152,8 @@ type
     function GetRolloffFactor : Single;
     function GetMaxDistance : Single;
     function GetPitch : Single;
-    function GetOffset(offtype : TOALOffsetType) : Single;
+    function GetOffsetFloat(offtype : TOALOffsetType) : Single;
+    function GetOffsetInt(offtype : TOALOffsetType) : Integer;
 
     procedure SetDirection(const aValue : TOALVector);
     procedure SetInnerAngle(aValue : Single);
@@ -345,7 +346,8 @@ type
     function GetRolloffFactor : Single;
     function GetMaxDistance : Single;
     function GetPitch : Single;
-    function GetOffset(offtype : TOALOffsetType) : Single;
+    function GetOffsetFloat(offtype : TOALOffsetType) : Single;
+    function GetOffsetInt(offtype : TOALOffsetType) : Integer;
 
     procedure SetDirection(const aValue : TOALVector);
     procedure SetInnerAngle(aValue : Single);
@@ -571,8 +573,10 @@ type
     procedure SetFormat(AValue : TOALFormat); virtual;
     procedure SetFreq(AValue : Cardinal); virtual;
   public
-    function  SamplesToBytes(smp : Integer) : Integer; virtual;
-    function  BytesToSamples(byt : Integer) : Integer; virtual;
+    function  SamplesToBytes(smp : Integer) : Int64; virtual;
+    function  BytesToSamples(byt : Int64) : Integer; virtual;
+    function  BytesToTime(byt : Int64) : Double; virtual;
+    function  TimeToSample(tim : Double) : Integer; virtual;
 
     property Format : TOALFormat read GetFormat write SetFormat;
     property Frequency : Cardinal read GetFreq write SetFreq;
@@ -586,6 +590,10 @@ type
 
     function LoadFromFile(const Fn : String) : Boolean; virtual; abstract;
     function LoadFromStream(Str : TStream) : Boolean; virtual; abstract;
+
+    procedure SeekTime(aTime : Double); virtual;
+    procedure SeekSample(aSample : Integer); virtual;
+    function TellSamples : Integer; virtual;
 
     function ReadChunk(const Buffer : Pointer;
                          Pos : Int64;
@@ -607,31 +615,39 @@ type
     FBuffer  : Pointer;
     FMaxSize : Integer;
     FPos     : Int64;
-
-    FLstFormat : TOALFormat;
-    FLstFreq   : Cardinal;
+    FUnqSize : Int64;
 
     FDatasrc : TOALStreamDataSource;
 
-    procedure Init(buffers, buffersize  : Integer);
-    procedure Done;
     procedure SetDataSrc(AValue : TOALStreamDataSource);
-    procedure SetSource(AValue : IOALSource);
-    function  Stream(buf : IOALBuffer) : Boolean;
-    procedure StartPlaying;
+  protected
+    procedure Init(buffers, buffersize  : Integer); virtual;
+    procedure Done; virtual;
+    procedure SetSource(AValue : IOALSource); virtual;
+    function  GetSource : IOALSource; virtual;
+    function  Stream(buf : IOALBuffer) : Boolean; virtual;
+    procedure StartPlaying; virtual;
   public
     constructor Create(buffers, buffersize  : Integer);
     destructor Destroy; override;
 
-    procedure Play;
-    procedure PlayLoop;
-    procedure Rewind;
-    procedure Pause;
-    procedure Stop;
+    procedure Play; virtual;
+    procedure PlayLoop; virtual;
+    procedure Rewind; virtual;
+    procedure Pause; virtual;
+    procedure Resume; virtual;
+    procedure Stop; virtual;
 
-    procedure Proceed;
+    procedure SeekTime(aTime : Double); virtual;
 
-    property Source : IOALSource read FSource write SetSource;
+    function PlayedTime : Double; virtual;
+    function PlayedSamples : Integer; virtual;
+    function DecodedTime : Double; virtual;
+    function DecodedSamples : Integer; virtual;
+
+    procedure Proceed; virtual;
+
+    property Source : IOALSource read GetSource write SetSource;
     property DataSource : TOALStreamDataSource read FDataSrc write SetDataSrc;
   end;
 
@@ -650,6 +666,9 @@ type
     procedure DoInit(const devicename : String;
                            buffers, buffersize  : Integer);
     procedure Done;
+  protected
+    function CreateStreamingHelper(buffers, buffersize : Integer
+      ) : TOALStreamingHelper; virtual;
   public
     constructor Create;
     destructor Destroy; override;
@@ -666,7 +685,15 @@ type
     procedure PlayLoop;
     procedure Rewind;
     procedure Pause;
+    procedure Resume;
     procedure Stop;
+
+    procedure SeekTime(aTime : Double);
+
+    function PlayedTime : Double;
+    function PlayedSamples : Integer;
+    function DecodedTime : Double;
+    function DecodedSamples : Integer;
 
     class function DefaultBufferCount : Integer; virtual;
     class function DefaultMaxBufferSize : Integer; virtual;
@@ -765,6 +792,7 @@ type
                                 buffersize: Integer) : IOALCaptureDevice;
 
     class function OALFormat(channels, bitspersample : Integer) : TOALFormat;
+    class function OALFormatToSampleSize(fmt : TOALFormat) : Integer;
     class function OALFormatToALenum(fmt : TOALFormat) : ALenum;
 
     class function Vector(X, Y, Z : Single) : TOALVector;
@@ -1001,17 +1029,17 @@ begin
   FFreq := AValue;
 end;
 
-function TOALAudioData.SamplesToBytes(smp : Integer) : Integer;
+function TOALAudioData.SamplesToBytes(smp : Integer) : Int64;
 begin
   case fformat of
-    oalfStereo8, oalfMono16 : Result :=  smp shl 1;
-    oalfStereo16 : Result :=  smp shl 2;
+    oalfStereo8, oalfMono16 : Result :=  Int64(smp) shl 1;
+    oalfStereo16 : Result :=  Int64(smp) shl 2;
   else
-    Result := smp;
+    Result := Int64(smp);
   end;
 end;
 
-function TOALAudioData.BytesToSamples(byt : Integer) : Integer;
+function TOALAudioData.BytesToSamples(byt : Int64) : Integer;
 begin
   case fformat of
     oalfStereo8, oalfMono16 : Result :=  byt shr 1;
@@ -1021,12 +1049,37 @@ begin
   end;
 end;
 
+function TOALAudioData.BytesToTime(byt : Int64) : Double;
+begin
+  Result := Double(BytesToSamples(byt)) / Double(Frequency);
+end;
+
+function TOALAudioData.TimeToSample(tim : Double) : Integer;
+begin
+  Result := Round(tim * Frequency);
+end;
+
 { TOALStreamDataSource }
 
 constructor TOALStreamDataSource.Create;
 begin
   FFormat := oalfUnknown;
-  FFreq := 0;
+  FFreq := 1; //to avoid divizion by zero
+end;
+
+procedure TOALStreamDataSource.SeekTime(aTime : Double);
+begin
+  SeekSample(TimeToSample(aTime));
+end;
+
+procedure TOALStreamDataSource.SeekSample(aSample : Integer);
+begin
+  //do nothing
+end;
+
+function TOALStreamDataSource.TellSamples : Integer;
+begin
+  Result := 0;
 end;
 
 { TOALStreamingHelper }
@@ -1039,8 +1092,7 @@ begin
   FBuffer := GetMem(buffersize);
   FMaxSize := buffersize;
   FPos := 0;
-  FLstFormat := oalfUnknown;
-  FLstFreq := 0;
+  FUnqSize := 0;
 end;
 
 procedure TOALStreamingHelper.Done;
@@ -1062,6 +1114,8 @@ begin
   if Assigned(FDatasrc) then FreeAndNil(FDatasrc);
 
   FDatasrc := AValue;
+  FUnqSize := 0;
+  FPos := 0;
 end;
 
 procedure TOALStreamingHelper.SetSource(AValue : IOALSource);
@@ -1070,15 +1124,20 @@ begin
   FSource := AValue;
 end;
 
+function TOALStreamingHelper.GetSource : IOALSource;
+begin
+  Result := FSource;
+end;
+
 function TOALStreamingHelper.Stream(buf : IOALBuffer) : Boolean;
 var sz : Integer;
 begin
   if Assigned(FDatasrc) then
   begin
-    sz := FDatasrc.ReadChunk(FBuffer, FPos, FMaxSize, FLooping, FLstFormat, FLstFreq);
+    sz := FDatasrc.ReadChunk(FBuffer, FPos, FMaxSize, FLooping, FDatasrc.FFormat, FDatasrc.FFreq);
     if sz > 0 then
     begin
-      buf.Data(FLstFormat, FBuffer, sz, FLstFreq);
+      buf.Data(FDatasrc.Format, FBuffer, sz, FDatasrc.Frequency);
       Inc(FPos, Int64(sz));
       Result := True;
     end else
@@ -1088,17 +1147,25 @@ begin
 end;
 
 procedure TOALStreamingHelper.StartPlaying;
-var i : integer;
+var i, c : integer;
 begin
   if FSource.BuffersQueued = 0 then
   begin
     FPos := 0;
+    c := 0;
     for i := 0 to FBuffers.Count-1 do
     begin
-      if not Stream(FBuffers.GetBuffer(i)) then
-        Exit;
+      if Stream(FBuffers.GetBuffer(i)) then
+        Inc(c)
+      else
+        Break;
     end;
-    FSource.QueueBuffers(FBuffers);
+    if c > 0 then
+    begin
+      if c < FBuffers.Count then
+        FSource.QueueBuffers(FBuffers.GetSubBuffers(0, c)) else
+        FSource.QueueBuffers(FBuffers);
+    end;
   end;
   if FSource.BuffersQueued > 0 then
     FSource.Play;
@@ -1143,9 +1210,60 @@ begin
   FSource.Pause;
 end;
 
+procedure TOALStreamingHelper.Resume;
+begin
+  FSource.Play;
+end;
+
 procedure TOALStreamingHelper.Stop;
 begin
   FSource.Stop;
+end;
+
+procedure TOALStreamingHelper.SeekTime(aTime : Double);
+begin
+  if Assigned(FDatasrc) then
+  begin
+    FDatasrc.SeekTime(aTime);
+    FUnqSize := FDatasrc.SamplesToBytes(FDatasrc.TellSamples);
+    FPos := FUnqSize;
+  end;
+end;
+
+function TOALStreamingHelper.PlayedTime : Double;
+begin
+  if Assigned(FDatasrc) then
+  begin
+    Result := FSource.GetOffsetFloat(oalotSecond) + FDatasrc.BytesToTime(FUnqSize);
+  end else
+    Result := 0;
+end;
+
+function TOALStreamingHelper.PlayedSamples : Integer;
+begin
+  if Assigned(FDatasrc) then
+  begin
+    Result := FSource.GetOffsetInt(oalotSample) + FDatasrc.BytesToSamples(FUnqSize);
+  end else
+    Result := 0;
+end;
+
+function TOALStreamingHelper.DecodedTime : Double;
+begin
+  if Assigned(FDatasrc) then
+  begin
+    Result := FDatasrc.BytesToTime(FPos);
+  end else
+    Result := 0;
+end;
+
+function TOALStreamingHelper.DecodedSamples : Integer;
+begin
+  if Assigned(FDatasrc) then
+  begin
+    Result := FDatasrc.BytesToSamples(FPos);
+  end else
+    Result := 0;
 end;
 
 procedure TOALStreamingHelper.Proceed;
@@ -1158,6 +1276,7 @@ begin
     Processed := FSource.BuffersProcessed;
     if Processed > 0 then repeat
       Buf := FSource.UnqueueBuffer;
+      Inc(FUnqSize, Buf.GetSize);
       if Stream(Buf) then
         FSource.QueueBuffer(Buf)
       else
@@ -1260,10 +1379,41 @@ begin
     FStrHelper.Pause;
 end;
 
+procedure TOALPlayer.Resume;
+begin
+  if Status = oalsPaused then
+    FStrHelper.Resume;
+end;
+
 procedure TOALPlayer.Stop;
 begin
   if Status in [oalsPlaying, oalsPaused] then
     FStrHelper.Stop;
+end;
+
+procedure TOALPlayer.SeekTime(aTime : Double);
+begin
+  FStrHelper.SeekTime(aTime);
+end;
+
+function TOALPlayer.PlayedTime : Double;
+begin
+  Result := FStrHelper.PlayedTime;
+end;
+
+function TOALPlayer.PlayedSamples : Integer;
+begin
+  Result := FStrHelper.PlayedSamples;
+end;
+
+function TOALPlayer.DecodedTime : Double;
+begin
+  Result := FStrHelper.DecodedTime;
+end;
+
+function TOALPlayer.DecodedSamples : Integer;
+begin
+  Result := FStrHelper.DecodedSamples;
 end;
 
 procedure TOALPlayer.DoInit(const devicename : String; buffers,
@@ -1286,17 +1436,7 @@ begin
         OALListener.SetVelocity(TOpenAL.ZeroVector);
         OALListener.SetOrientation(TOpenAL.VectorPair(0,0,1,0,1,0));
 
-        FStrHelper := TOALStreamingHelper.Create(buffers, buffersize);
-        if Assigned(FSourceClass) then
-          FStrHelper.DataSource := FSourceClass.Create;
-        if FStrHelper.Source.Valid then
-        begin
-          FStrHelper.Source.Pitch := 1.0;
-          FStrHelper.Source.Gain := 1.0;
-          FStrHelper.Source.Position := TOpenAL.ZeroVector;
-          FStrHelper.Source.Velocity := TOpenAL.ZeroVector;
-          FStrHelper.Source.Looping := false;
-        end;
+        FStrHelper := CreateStreamingHelper(buffers, buffersize);
 
         FContext.RaiseError;
 
@@ -1314,8 +1454,15 @@ begin
   if FStatus = oalsInvalid then
     Result := FStatus else
   begin
-    FStatus := FStrHelper.Source.State;
-    Result := FStatus ;
+    if Assigned(FStrHelper) then
+    begin
+      FStatus := FStrHelper.Source.State;
+      if FStatus = oalsStopped then
+        if FStrHelper.Source.BuffersQueued > 0 then
+          FStatus := oalsPlaying;
+    end else
+      FStatus := oalsInvalid;
+    Result := FStatus;
   end;
 end;
 
@@ -1331,6 +1478,23 @@ begin
     FDevice := nil;
   end;
   FStatus := oalsInvalid;
+end;
+
+function TOALPlayer.CreateStreamingHelper(buffers,
+  buffersize : Integer) : TOALStreamingHelper;
+begin
+  Result := TOALStreamingHelper.Create(buffers, buffersize);
+  if Assigned(FSourceClass) then
+    Result.DataSource := FSourceClass.Create;
+  if Result.Source.Valid then
+  begin
+    Result.Source.Pitch := 1.0;
+    Result.Source.Gain := 1.0;
+    Result.Source.Position := TOpenAL.ZeroVector;
+    Result.Source.Velocity := TOpenAL.ZeroVector;
+    Result.Source.Looping := false;
+  end;
+  FStrHelper := Result;
 end;
 
 class function TOALPlayer.DefaultBufferCount : Integer;
@@ -2051,6 +2215,17 @@ begin
     Result := oalfUnknown;
 end;
 
+class function TOpenAL.OALFormatToSampleSize(fmt : TOALFormat) : Integer;
+begin
+  case fmt of
+      oalfMono8 : Result := 1;
+      oalfMono16 : Result := 2;
+      oalfStereo8 : Result := 2;
+  else
+      Result := 4;
+  end;
+end;
+
 class function TOpenAL.OALFormatToALenum(fmt : TOALFormat) : ALenum;
 begin
   case fmt of
@@ -2371,7 +2546,7 @@ begin
   alGetSourcef(FRef, AL_PITCH, @Result);
 end;
 
-function TOALRefSource.GetOffset(offtype : TOALOffsetType) : Single;
+function TOALRefSource.GetOffsetFloat(offtype : TOALOffsetType) : Single;
 var loc : Integer;
 begin
   case offtype of
@@ -2382,6 +2557,19 @@ begin
   end;
 
   alGetSourcef(FRef, loc, @Result);
+end;
+
+function TOALRefSource.GetOffsetInt(offtype : TOALOffsetType) : Integer;
+var loc : Integer;
+begin
+  case offtype of
+    oalotSecond : loc := AL_SEC_OFFSET;
+    oalotSample : loc := AL_SAMPLE_OFFSET;
+  else
+    loc := AL_BYTE_OFFSET;
+  end;
+
+  alGetSourcei(FRef, loc, @Result);
 end;
 
 procedure TOALRefSource.SetDirection(const aValue : TOALVector);
