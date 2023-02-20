@@ -771,6 +771,7 @@ type
     FDevice  : IOALCaptureDevice;
     FBuffer     : Pointer;
     FBufferSize, FBufferSamples : Integer;
+    FTotalSamples               : Integer;
 
     FRecordClass : TOALStreamDataRecorderClass;
 
@@ -781,12 +782,19 @@ type
                            buffersize  : Integer);
     procedure Done;
     procedure FlushSamples(smp : Integer);
+  protected
+    procedure SetRecordClass(aRClass : TOALStreamDataRecorderClass); virtual;
   public
     constructor Create;
     destructor Destroy; override;
 
     procedure Init; overload;
     procedure Init(const devicename : String); overload;
+    procedure Init(const devicename : String;
+                         channels : Cardinal;
+                         bitdepth : Byte;
+                         freq   : Cardinal;
+                         buffersize  : Integer); overload;
     procedure Init(const devicename : String;
                          format : TOALFormat;
                          freq   : Cardinal;
@@ -800,12 +808,18 @@ type
     procedure Pause;
     procedure Stop;
 
+    function TotalSamplesCaptured : Integer;
+    function Frequency : Cardinal;
+    function Format : TOALFormat;
+    function Channels : Cardinal;
+    function BitsPerSample : Byte;
+
     class function DefaultFormat : TOALFormat; virtual;
     class function DefaultFrequency : Cardinal; virtual;
     class function DefaultMaxBufferSize : Integer; virtual;
 
     property Recorder : TOALStreamDataRecorder read FRecorder;
-    property DataRecClass : TOALStreamDataRecorderClass read FRecordClass write FRecordClass;
+    property DataRecClass : TOALStreamDataRecorderClass read FRecordClass write SetRecordClass;
     property Status : TOALCaptureState read GetStatus;
   end;
 
@@ -832,7 +846,9 @@ type
                                 buffersize: Integer) : IOALCaptureDevice;
 
     class function OALFormat(channels, bitspersample : Integer) : TOALFormat;
-    class function OALFormatToSampleSize(fmt : TOALFormat) : Integer;
+    class function OALFormatToSampleSize(fmt : TOALFormat) : Cardinal;
+    class function OALFormatToChannels(fmt : TOALFormat) : Cardinal;
+    class function OALFormatToBitsPerSample(fmt : TOALFormat) : Byte;
     class function OALFormatToALenum(fmt : TOALFormat) : ALenum;
 
     class function Vector(X, Y, Z : Single) : TOALVector;
@@ -919,15 +935,23 @@ begin
   end;
   if Assigned(FBuffer) then
     FreeMemAndNil(FBuffer);
+  FTotalSamples := 0;
   FStatus := oalcsInvalid;
 end;
 
 procedure TOALCapture.FlushSamples(smp : Integer);
 begin
   if smp > FBufferSamples then smp := FBufferSamples;
+  Inc(FTotalSamples, smp);
   FDevice.Samples(FBuffer, smp);
   if Assigned(FRecorder) then
      FRecorder.WriteSamples(FBuffer, smp);
+end;
+
+procedure TOALCapture.SetRecordClass(aRClass : TOALStreamDataRecorderClass);
+begin
+  if FRecordClass = aRClass then Exit;
+  FRecordClass := aRClass
 end;
 
 constructor TOALCapture.Create;
@@ -952,6 +976,15 @@ procedure TOALCapture.Init(const devicename : String);
 begin
   Done;
   DoInit(devicename, DefaultFormat, DefaultFrequency, DefaultMaxBufferSize);
+end;
+
+procedure TOALCapture.Init(const devicename : String; channels : Cardinal;
+  bitdepth : Byte; freq : Cardinal; buffersize : Integer);
+var
+  fmt : TOALFormat;
+begin
+  fmt := TOpenAL.OALFormat(channels, bitdepth);
+  Init(devicename, fmt, freq, buffersize);
 end;
 
 procedure TOALCapture.Init(const devicename : String; format : TOALFormat;
@@ -1021,6 +1054,43 @@ begin
     Done;
     FStatus := oalcsInvalid;
   end;
+end;
+
+function TOALCapture.TotalSamplesCaptured : Integer;
+begin
+  Result := FTotalSamples;
+end;
+
+function TOALCapture.Frequency : Cardinal;
+begin
+  if Assigned(FRecorder) then
+    Result := FRecorder.Frequency
+  else
+    Result := 0;
+end;
+
+function TOALCapture.Format : TOALFormat;
+begin
+  if Assigned(FRecorder) then
+    Result := FRecorder.Format
+  else
+    Result := oalfUnknown;
+end;
+
+function TOALCapture.Channels : Cardinal;
+begin
+  if Assigned(FRecorder) then
+    Result := TOpenAL.OALFormatToChannels(FRecorder.Format)
+  else
+    Result := 0;
+end;
+
+function TOALCapture.BitsPerSample : Byte;
+begin
+  if Assigned(FRecorder) then
+    Result := TOpenAL.OALFormatToBitsPerSample(FRecorder.Format)
+  else
+    Result := 0;
 end;
 
 class function TOALCapture.DefaultFormat : TOALFormat;
@@ -2366,7 +2436,7 @@ begin
     Result := oalfUnknown;
 end;
 
-class function TOpenAL.OALFormatToSampleSize(fmt : TOALFormat) : Integer;
+class function TOpenAL.OALFormatToSampleSize(fmt : TOALFormat) : Cardinal;
 begin
   case fmt of
       oalfMono8 : Result := 1;
@@ -2374,6 +2444,26 @@ begin
       oalfStereo8 : Result := 2;
   else
       Result := 4;
+  end;
+end;
+
+class function TOpenAL.OALFormatToChannels(fmt : TOALFormat) : Cardinal;
+begin
+  case fmt of
+      oalfMono8, oalfMono16 : Result := 1;
+      oalfStereo8, oalfStereo16 : Result := 2;
+  else
+      Result := 0;
+  end;
+end;
+
+class function TOpenAL.OALFormatToBitsPerSample(fmt : TOALFormat) : Byte;
+begin
+  case fmt of
+      oalfMono8, oalfStereo8 : Result := 8;
+      oalfMono16, oalfStereo16 : Result := 16;
+  else
+      Result := 0;
   end;
 end;
 
