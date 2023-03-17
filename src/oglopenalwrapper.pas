@@ -606,6 +606,11 @@ type
                          var freq : Cardinal) : Integer; virtual; abstract;
   end;
 
+  TOALOnNextBuffer = procedure (aBuffer : Pointer;
+                                aSize : Int64;
+                                aFormat : TOALFormat;
+                                aFrequency : Cardinal) of object;
+
   { IOALStreamingHelper }
 
   IOALStreamingHelper = interface
@@ -613,7 +618,9 @@ type
   procedure Init(buffers, buffersize  : Integer);
   procedure Done;
   procedure SetDataSrc(AValue : TOALStreamDataSource);
+  procedure SetOnNextBuffer(AValue : TOALOnNextBuffer);
   procedure SetSource(AValue : IOALSource);
+  function  GetOnNextBuffer : TOALOnNextBuffer;
   function  GetDataSrc : TOALStreamDataSource;
   function  GetSource : IOALSource;
 
@@ -637,6 +644,7 @@ type
 
   property Source : IOALSource read GetSource write SetSource;
   property DataSource : TOALStreamDataSource read GetDataSrc write SetDataSrc;
+  property OnNextBuffer : TOALOnNextBuffer read GetOnNextBuffer write SetOnNextBuffer;
   end;
 
   TOALStreamDataSourceClass = class of TOALStreamDataSource;
@@ -646,6 +654,7 @@ type
   TOALStreamingHelper = class(TInterfacedObject, IOALStreamingHelper)
   private
     FBuffers : IOALBuffers;
+    FOnNextBuffer : TOALOnNextBuffer;
     FSource  : IOALSource;
     FLooping : Boolean;
     FBuffer  : Pointer;
@@ -654,6 +663,8 @@ type
     FUnqSize : Int64;
 
     FDatasrc : TOALStreamDataSource;
+    procedure SetOnNextBuffer(AValue : TOALOnNextBuffer);
+    function  GetOnNextBuffer : TOALOnNextBuffer;
   protected
     procedure Init(buffers, buffersize  : Integer); virtual;
     procedure Done; virtual;
@@ -1204,6 +1215,17 @@ end;
 
 { TOALStreamingHelper }
 
+procedure TOALStreamingHelper.SetOnNextBuffer(AValue : TOALOnNextBuffer);
+begin
+  if FOnNextBuffer = AValue then Exit;
+  FOnNextBuffer := AValue;
+end;
+
+function TOALStreamingHelper.GetOnNextBuffer : TOALOnNextBuffer;
+begin
+  Result := FOnNextBuffer;
+end;
+
 procedure TOALStreamingHelper.Init(buffers, buffersize : Integer);
 begin
   FSource := TOpenAL.GetCurrentContext.GenSource;
@@ -1275,6 +1297,12 @@ begin
     begin
       buf.Data(FDatasrc.Format, FBuffer, sz, FDatasrc.Frequency);
       Inc(FPos, Int64(sz));
+
+      if Assigned(FOnNextBuffer) then
+      begin
+        FOnNextBuffer(FBuffer, sz, FDatasrc.FFormat, FDatasrc.FFreq);
+      end;
+
       Result := True;
     end else
       Result := False;
